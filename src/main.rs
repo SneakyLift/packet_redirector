@@ -15,50 +15,48 @@ fn main() {
     let (sender1, receiver1) = mpsc::sync_channel(0);
     let (sender2, receiver2) = mpsc::sync_channel(0);
     //process connections continuously in its own thread
-    thread::spawn(||match listener_thread(listener, destination,
-                                          receiver2, sender1) {
-        Ok(..) => (),
-        Err(e) => panic!("{}", e),
-    });
+    thread::spawn(||listener_thread(listener, destination,
+                                    receiver2, sender1));
     //Separate thread checking how long the server has been inactive
     thread::spawn(|| {server_switch_thread(receiver1, sender2)});
     loop{}
 }
 //To be called by a listener thread. Listens on a port and handles connections
 fn listener_thread(listener: TcpListener, dest: String, receiver: mpsc::Receiver<bool>,
-                   sender: mpsc::SyncSender<bool>) -> std::io::Result<()> {
-    let mut server_on = true;
+                   sender: mpsc::SyncSender<bool>) {
     //this loop checks that the streams are valid, sets the server_on bool, and handles connections.
     //listener.incoming() causes this to loop indefinitely (i think)
     for stream in listener.incoming() {
         //if stream is valid, set it to stream_source as a tcp stream instead of a result
-        if let Ok(t) = stream {
-            let stream_source = t;
-            if let Ok(y) = TcpStream::connect(&dest) {
-                //if the connection is successful, set stream_dest to that connection
-                let stream_dest = y;
-                //the receiver attempts to get a message from the server_switch thread
-                //about the status of the server, then sets server_on to that status
-                //true if the server is on, false if it is off.
-                if let Ok(b) = receiver.recv() {
-                    server_on = b;
-                }
-                //attempts to pass packets between the two streams
-                match handle_tcp_connection(stream_source, stream_dest, server_on) {
-                    Ok(..) => (),
-                    Err(..) => (),
-                }
-                //handle_udp_connection (should this be its own thread?)
-                match sender.send(true) {
-                    Ok(..) => (),
-                    Err(..) => (),
-                } //sends an update to the server_switch indicating access
-            }
+        let stream_source = match stream {
+            Ok(t) => t,
+            Err(e) => panic!("invalid TCP listener! Error: {} ", e),
+        };
+        //if the connection is successful, set stream_dest to that connection
+        let stream_dest = match TcpStream::connect(&dest) {
+            Ok(s) => s,
+            Err(e) => panic!("Unable to connect to address! Error: {}", e),
+        };
+        //the receiver attempts to get a message from the server_switch thread
+        //about the status of the server, then sets server_on to that status
+        //true if the server is on, false if it is off.
+        let server_on = match receiver.try_recv() {
+            Ok(r) => r,
+            Err(..) => panic!("Could not receive server_on signal!"),
+        };
+        //attempts to pass packets between the two streams
+        match handle_tcp_connection(stream_source, stream_dest, server_on) {
+            Ok(..) => (),
+            Err(..) => panic!("Could not handle tcp connection!"),
         }
+        //handle_udp_connection (should this be its own thread?)
+        match sender.send(true) {
+            Ok(..) => (),
+            Err(..) => (),
+        } //sends an update to the server_switch indicating access
     }
-    //should never actually reach here so it should probably return error but :/
-    Ok(())
 }
+//should never actually reach here so it should probably return error but :/
 
 //to be called by a server_switch thread. Continuously checks if the listener thread
 //has sent an update message. If 30 minutes have passed with no update message
