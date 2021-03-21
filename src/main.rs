@@ -68,7 +68,6 @@ fn server_switch_thread(receiver: mpsc::Receiver<bool>, sender: mpsc::SyncSender
     let mut server_on = true;
     //server_switch loop
     loop {
-
         //check if there's been an update message, if there has been set update = true
         //if not, update = false
         let update = match receiver.try_recv() {
