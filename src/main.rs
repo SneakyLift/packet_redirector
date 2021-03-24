@@ -1,23 +1,25 @@
 use tokio::net::{TcpListener, TcpStream};
-use tokio::io::copy;
+use tokio::io::{copy, split};
 // use std::sync::{Arc, Mutex};
 // use std::time::{Duration, SystemTime};
 
 const DEST_MACHINE: &'static str = "127.0.0.1:25565";
 const LISTEN_PORT: &'static str = "127.0.0.1:23";
 
-//TODO
-// Check if this is broken or not. Current testing can't get the tunnel established,
-// but may be a telnet thing
-
 async fn handle_client(mut stream: TcpStream) {
     println!("handle client called");
     let mut tunnel = TcpStream::connect(DEST_MACHINE).await.unwrap();
     println!("tunnel established");
-    loop {
-        println!("Forwarded {} bytes", copy(&mut tunnel, &mut stream).await.unwrap());
-        println!("Forwarded {} bytes", copy(&mut stream, &mut tunnel).await.unwrap());
-    }
+    let (mut tunnel_reader, mut tunnel_writer) =
+        split(tunnel);
+    let (mut stream_reader, mut stream_writer) =
+        split(stream);
+    tokio::spawn(async move {
+        copy(&mut stream_reader, &mut tunnel_writer).await;
+    });
+    tokio::spawn(async move {
+        copy(&mut tunnel_reader, &mut stream_writer).await;
+    });
 }
 
 //TODO
